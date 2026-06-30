@@ -1,0 +1,67 @@
+package tegmentum:address-standardizer-pagc@0.1.0;
+
+/// US address standardization/parsing backed by the vendored PAGC C
+/// library (the engine PostGIS `address_standardizer` ships). Output
+/// fields and record shape mirror the `tegmentum:address-standardizer`
+/// package so callers can swap the CRF MVP engine for the bit-identical
+/// PAGC engine without record-shape changes.
+interface address-standardizer {
+    /// PAGC-shaped parsed address. All fields optional — PAGC's
+    /// `STDADDR` struct can leave any component NULL.
+    record standardized-address {
+        /// Building name (PAGC `building`).
+        building: option<string>,
+        /// House / building number, e.g. "123".
+        house-num: option<string>,
+        /// Pre-directional, e.g. "N", "SW".
+        predir: option<string>,
+        /// Qualifier (PAGC `qual`), e.g. "OLD".
+        qual: option<string>,
+        /// Pre-type, e.g. "ROUTE".
+        pretype: option<string>,
+        /// Street name (no suffix/directional), e.g. "MAIN".
+        name: option<string>,
+        /// Street suffix / post-type, e.g. "ST", "AVE", "BLVD".
+        suftype: option<string>,
+        /// Post-directional, e.g. "N", "SW".
+        sufdir: option<string>,
+        /// Rural route designator.
+        ruralroute: option<string>,
+        /// Extra / overflow text PAGC couldn't classify.
+        extra: option<string>,
+        /// City / place name.
+        city: option<string>,
+        /// State (USPS 2-letter or standardized).
+        state: option<string>,
+        /// Country.
+        country: option<string>,
+        /// Postal code / ZIP.
+        postcode: option<string>,
+        /// PO Box number.
+        box: option<string>,
+        /// Unit/secondary designator: "APT 3", "STE 100", "# 5".
+        unit: option<string>,
+    }
+
+    record standardizer-error {
+        message: string,
+    }
+
+    /// Standardize an address string into a `standardized-address`.
+    /// Mirrors PostGIS `standardize_address(...)`.
+    standardize-address: func(addr: string) -> result<standardized-address, standardizer-error>;
+
+    /// Parse an address string. PAGC distinguishes "parse" from
+    /// "standardize" (parse uses pcre-driven splitting, standardize
+    /// runs the rule tables). The wasm component currently ships the
+    /// standardize path; `parse-address` delegates to it for API
+    /// parity with the sibling MVP component.
+    parse-address: func(addr: string) -> result<standardized-address, standardizer-error>;
+
+    /// Render a `standardized-address` back to a single-line string.
+    as-text: func(addr: standardized-address) -> string;
+}
+
+world address-standardizer-component {
+    export address-standardizer;
+}
