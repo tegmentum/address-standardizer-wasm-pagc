@@ -266,7 +266,10 @@ pagc_build_standardizer(const char *lex_sql, size_t lex_len,
     STANDARDIZER *std = std_init();
     if (!std) return NULL;
 
-    if (std_use_lex(std, lex) != 0) return NULL;
+    /* std_use_lex follows TRUE/FALSE convention (TRUE=success), while
+     * std_use_gaz/std_use_rules/std_ready_standardizer follow C
+     * 0=success convention. Mirror upstream std_pg_hash.c handling. */
+    if (std_use_lex(std, lex) == 0 /* FALSE */) return NULL;
     if (std_use_gaz(std, gaz) != 0) return NULL;
     if (std_use_rules(std, rules) != 0) return NULL;
     if (std_ready_standardizer(std) != 0) return NULL;

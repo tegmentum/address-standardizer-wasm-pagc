@@ -92,18 +92,35 @@ unsafe fn cstr_field(p: *mut c_char) -> Option<String> {
 }
 
 pub fn standardize(addr: &str) -> Result<StandardizedAddress, String> {
-    let std_ptr = get_standardizer()?;
-    let c_addr = CString::new(addr).map_err(|e| format!("invalid address: {e}"))?;
+    standardize_mm(addr, None)
+}
 
-    // PAGC's std_standardize_mm takes micro + macro buffers. We pass the
-    // full input as micro and NULL macro; PAGC's analyzer treats macro
-    // (city/state/postcode) as optional and parses everything from micro
-    // when absent. PAGC writes through these buffers, so they must be
-    // mutable heap allocations.
+/// Standardize with explicit micro+macro split, mirroring the PostGIS
+/// `standardize_address(lex, gaz, rules, micro, macro)` 5-arg entry point.
+/// `macro_addr` is the city/state/zip half; pass `None` for the 1-arg form.
+pub fn standardize_mm(micro: &str, macro_addr: Option<&str>) -> Result<StandardizedAddress, String> {
+    let std_ptr = get_standardizer()?;
+    let c_micro = CString::new(micro).map_err(|e| format!("invalid micro: {e}"))?;
+    let c_macro = match macro_addr {
+        Some(m) => Some(CString::new(m).map_err(|e| format!("invalid macro: {e}"))?),
+        None => None,
+    };
+
+    // PAGC's std_standardize_mm writes through both buffers; pass owned
+    // heap copies via CString::into_raw and reclaim them after the call.
+    let micro_raw = c_micro.into_raw();
+    let macro_raw = c_macro.map(|c| c.into_raw()).unwrap_or(core::ptr::null_mut());
     let stdaddr_ptr =
-        unsafe { ffi::std_standardize_mm(std_ptr, c_addr.into_raw(), core::ptr::null_mut(), 0 as c_int) };
+        unsafe { ffi::std_standardize_mm(std_ptr, micro_raw, macro_raw, 0 as c_int) };
+    // Reclaim the CStrings so they are dropped (PAGC does not free them).
+    unsafe {
+        let _ = CString::from_raw(micro_raw);
+        if !macro_raw.is_null() {
+            let _ = CString::from_raw(macro_raw);
+        }
+    }
     if stdaddr_ptr.is_null() {
-        return Err("PAGC: std_standardize_one returned NULL".to_string());
+        return Err("PAGC: std_standardize_mm returned NULL".to_string());
     }
 
     let out = unsafe {
