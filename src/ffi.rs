@@ -3,11 +3,29 @@
 //! here as plain `extern "C"` declarations; safe wrappers live in
 //! `ops.rs`.
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_double, c_int};
 
 #[repr(C)]
 pub struct Standardizer {
     _opaque: [u8; 0],
+}
+
+/// Mirrors `ADDRESS` in `parseaddress-api.h`. Field ownership matches
+/// `pagc_parse_address`: each `*mut c_char` is heap-allocated or NULL
+/// and freed via `pagc_address_free`.
+#[repr(C)]
+pub struct Address {
+    pub num: *mut c_char,
+    pub street: *mut c_char,
+    pub street2: *mut c_char,
+    pub address1: *mut c_char,
+    pub city: *mut c_char,
+    pub st: *mut c_char,
+    pub zip: *mut c_char,
+    pub zipplus: *mut c_char,
+    pub cc: *mut c_char,
+    pub lat: c_double,
+    pub lon: c_double,
 }
 
 /// Mirrors `STDADDR` in `pagc_std_api.h`. All 16 fields are owned C
@@ -57,4 +75,15 @@ extern "C" {
     ) -> *mut Stdaddr;
 
     pub fn stdaddr_free(addr: *mut Stdaddr);
+
+    /// Parse an address string via PAGC's `parseaddress()` path (PCRE2
+    /// regex splitting on the trailing macro, zip, state, city). Defined
+    /// in `src/pagc/wasm_parser.c` on top of the vendored
+    /// `parseaddress-api.c`. Returns NULL only on OOM or state-hash
+    /// bootstrap failure; regex misses still return an ADDRESS with
+    /// NULL fields.
+    pub fn pagc_parse_address(input: *const c_char) -> *mut Address;
+
+    /// Free an ADDRESS returned by `pagc_parse_address`.
+    pub fn pagc_address_free(addr: *mut Address);
 }

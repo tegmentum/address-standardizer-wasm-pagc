@@ -14,7 +14,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <string.h>
+
+/* PostgreSQL macro: array length. parseaddress-api.c uses it against
+ * the static country_aliases[] table. */
+#ifndef lengthof
+#define lengthof(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 /* Memory: PAGC's standard.c calls pfree() on heap strings produced by
  * its own allocator paths. We back palloc/pfree with malloc/free. */

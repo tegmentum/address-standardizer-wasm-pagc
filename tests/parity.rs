@@ -184,3 +184,25 @@ fn parity_against_postgis_reference() {
         "PAGC parity regression: {passed}/{total} matched, need >= {threshold} (95%)"
     );
 }
+
+#[test]
+fn parse_returns_structured_output() {
+    // Sanity check that the pcre2-backed parse_address path (new in #708)
+    // now runs an actual PCRE2 regex split rather than delegating to
+    // standardize_address. Two smoke assertions:
+    //   1. Trailing "US" gets stripped into country + state stays.
+    //   2. Zip and state are pulled out even without an explicit macro.
+    use address_standardizer_wasm_pagc::ops::parse;
+
+    let a = parse("123 Main St, Kansas City, MO 45678").expect("parse");
+    assert_eq!(a.state.as_deref(), Some("MO"), "state mis-extracted: {a:?}");
+    assert_eq!(a.postcode.as_deref(), Some("45678"), "zip mis-extracted: {a:?}");
+    assert!(a.country.is_some(), "country should be tagged: {a:?}");
+
+    // parse() must not just alias to standardize(): standardize() populates
+    // suftype ("ST" for "Street") while parse() does not.
+    assert!(
+        a.suftype.is_none(),
+        "parse() should not fill suftype (that's standardize's job): {a:?}"
+    );
+}

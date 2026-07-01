@@ -148,10 +148,77 @@ pub fn standardize_mm(micro: &str, macro_addr: Option<&str>) -> Result<Standardi
     Ok(out)
 }
 
-/// `parse_address` shares the standardize path; PAGC's separate parse
-/// route uses PCRE2 which is not yet wired in for wasm.
+/// `parse_address` runs PAGC's PCRE2-driven regex splitter
+/// (`parseaddress()` in the vendored `parseaddress-api.c`) rather than
+/// the rules/lex standardizer. It extracts the trailing macro half of
+/// the address (city / state / postcode / country) plus a leading
+/// house-number, and leaves the street name intact rather than
+/// normalising it against the lex tables.
+///
+/// The output is packed into the same `StandardizedAddress` shape as
+/// `standardize()`. The PAGC `ADDRESS` fields map as:
+///
+///   ADDRESS.num       -> house_num
+///   ADDRESS.street    -> name
+///   ADDRESS.street2   -> extra
+///   ADDRESS.city      -> city
+///   ADDRESS.st        -> state
+///   ADDRESS.zip[+zipplus] -> postcode
+///   ADDRESS.cc        -> country
+///
+/// PAGC's parse path has no notion of building / predir / qual /
+/// pretype / suftype / sufdir / ruralroute / box / unit — those fields
+/// stay `None`. Callers that need the normalised street-name split
+/// should still use `standardize()`.
 pub fn parse(addr: &str) -> Result<StandardizedAddress, String> {
-    standardize(addr)
+    let c_input = CString::new(addr).map_err(|e| format!("invalid address: {e}"))?;
+    let addr_ptr = unsafe { ffi::pagc_parse_address(c_input.as_ptr()) };
+    if addr_ptr.is_null() {
+        return Err("PAGC: pagc_parse_address returned NULL".to_string());
+    }
+
+    let out = unsafe {
+        let r = &*addr_ptr;
+        let zip = cstr_field(r.zip);
+        let zipplus = cstr_field(r.zipplus);
+        let postcode = match (&zip, &zipplus) {
+            (Some(z), Some(p)) => Some(format!("{z}-{p}")),
+            (Some(z), None) => Some(z.clone()),
+            (None, Some(p)) => Some(p.clone()),
+            (None, None) => None,
+        };
+        // PAGC always tags the country as "US" unless it stripped an
+        // explicit trailing token; leave the field populated as-is.
+        let mut extra = cstr_field(r.street2);
+        if let Some(a1) = cstr_field(r.address1) {
+            // If parseaddress could not split num/street it drops the
+            // whole cleaned input into address1. Surface it in `extra`
+            // so callers still see something.
+            if r.num.is_null() && r.street.is_null() && extra.is_none() {
+                extra = Some(a1);
+            }
+        }
+        StandardizedAddress {
+            building: None,
+            house_num: cstr_field(r.num),
+            predir: None,
+            qual: None,
+            pretype: None,
+            name: cstr_field(r.street),
+            suftype: None,
+            sufdir: None,
+            ruralroute: None,
+            extra,
+            city: cstr_field(r.city),
+            state: cstr_field(r.st),
+            country: cstr_field(r.cc),
+            postcode,
+            r#box: None,
+            unit: None,
+        }
+    };
+    unsafe { ffi::pagc_address_free(addr_ptr) };
+    Ok(out)
 }
 
 /// Single-line render of a `StandardizedAddress`. Mirrors what PostGIS
